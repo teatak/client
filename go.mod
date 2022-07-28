@@ -1,4 +1,4 @@
-module github.com/teatak/pay
+module github.com/teatak/client
 
 go 1.18
 

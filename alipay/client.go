@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/teatak/config/sections"
-	"github.com/teatak/pay/encoding"
 )
 
 const (
@@ -189,9 +188,9 @@ func verifyResponseData(data []byte, signType, sign string, key string) (ok bool
 	}
 
 	if signType == RSA {
-		err = encoding.VerifyPKCS1v15(data, signBytes, []byte(key), crypto.SHA1)
+		err = VerifyPKCS1v15(data, signBytes, []byte(key), crypto.SHA1)
 	} else {
-		err = encoding.VerifyPKCS1v15(data, signBytes, []byte(key), crypto.SHA256)
+		err = VerifyPKCS1v15(data, signBytes, []byte(key), crypto.SHA256)
 	}
 	if err != nil {
 		return false, err
@@ -212,7 +211,7 @@ func signRSA2(keys []string, param url.Values, privateKey []byte) (s string, err
 		}
 	}
 	var src = strings.Join(pList, "&")
-	sig, err := encoding.SignPKCS1v15([]byte(src), privateKey, crypto.SHA256)
+	sig, err := SignPKCS1v15([]byte(src), privateKey, crypto.SHA256)
 	if err != nil {
 		return "", err
 	}
@@ -233,7 +232,7 @@ func signRSA(keys []string, param url.Values, privateKey []byte) (s string, err 
 		}
 	}
 	var src = strings.Join(pList, "&")
-	sig, err := encoding.SignPKCS1v15([]byte(src), privateKey, crypto.SHA1)
+	sig, err := SignPKCS1v15([]byte(src), privateKey, crypto.SHA1)
 	if err != nil {
 		return "", err
 	}
