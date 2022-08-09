@@ -27,3 +27,12 @@ func (s *client) TradeCreate(request *TradeCreateRequest) (*TradeCreateResponse,
 	}
 	return response, nil
 }
+
+func (s *client) TradeQuery(request *TradeQueryRequest) (*TradeQueryResponse, error) {
+	response := &TradeQueryResponse{}
+	err := s.Excute(request).Decode(response)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}

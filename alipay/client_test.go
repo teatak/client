@@ -1,7 +1,6 @@
 package alipay
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -13,17 +12,17 @@ const (
 )
 
 func TestAuth(t *testing.T) {
-	// client := New(gateway, appID, privateKey, publicKey)
-	// request := &OauthTokenRequest{
-	// 	GrantType: "authorization_code",
-	// 	Code:      "a3af0ec1143e42868c567d72b22bHX46",
-	// }
-	// response := &OauthTokenResponse{}
-	// err := client.Excute(request).Decode(response)
-	// if err != nil {
-	// 	t.Error(err)
-	// }
-	// fmt.Println(response)
+	client := New(gateway, appID, privateKey, publicKey)
+	request := &OauthTokenRequest{
+		GrantType: "authorization_code",
+		Code:      "a3af0ec1143e42868c567d72b22bHX46",
+	}
+	response := &OauthTokenResponse{}
+	err := client.Excute(request).Decode(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(response)
 }
 
 func TestTeadeCreate(t *testing.T) {
@@ -38,9 +37,22 @@ func TestTeadeCreate(t *testing.T) {
 
 	response, err := client.TradeCreate(request)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	fmt.Println(response)
+	t.Log(response)
+}
+
+func TestTeadeQuery(t *testing.T) {
+	client := New(gateway, appID, privateKey, publicKey)
+	request := &TradeQueryRequest{
+
+		OutTradeNo: "3",
+	}
+	response, err := client.TradeQuery(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(response)
 }
 
 func TestTradeAppPay(t *testing.T) {
@@ -55,9 +67,9 @@ func TestTradeAppPay(t *testing.T) {
 
 	data, err := client.TradeAppPay(request)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
-	fmt.Println(data)
+	t.Log(data)
 }
 
 // p.NotifyURL = "http://203.86.24.181:3000/alipay"
