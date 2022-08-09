@@ -2,136 +2,123 @@ package alipay
 
 import (
 	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
-	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/teatak/config/sections"
-)
-
-const (
-	RSA  = "RSA"
-	RSA2 = "RSA2"
-)
-const (
-	RESPONSE_SUFFIX = "_response"
-	ERROR_RESPONSE  = "error_response"
-	SIGN_NODE_NAME  = "sign"
 )
 
 type client struct {
-	gateway      string
-	appId        string
-	privateKey   string
-	publicKey    string
-	signType     string
-	AppAuthToken string
-	client       *http.Client
+	gateway    string
+	appID      string
+	privateKey string
+	publicKey  string
 }
 
-func NewDefaultClient() *client {
-	d := sections.AliPay["default"]
-	return &client{
-		gateway:    d.Gateway,
-		appId:      d.AppID,
-		privateKey: d.PrivateKey,
-		publicKey:  d.PublicKey,
-		signType:   RSA2,
-	}
-}
+//创建默认client
+// func NewDefault() *client {
+// 	d := sections.AliPay["default"]
+// 	return &client{
+// 		gateway:    d.Gateway,
+// 		appID:      d.AppID,
+// 		privateKey: d.PrivateKey,
+// 		publicKey:  d.PublicKey,
+// 	}
+// }
 
 //创建client
-func NewClient(gateway, appId, privateKey, publicKey, signType string) *client {
+func New(gateway, appID, privateKey, publicKey string) *client {
 	return &client{
 		gateway:    gateway,
-		appId:      appId,
+		appID:      appID,
 		privateKey: privateKey,
 		publicKey:  publicKey,
-		signType:   signType,
 	}
 }
 
-//执行
-func (s *client) Excute(request Request) (response Response, err error) {
-	response = request.GetResponse()
-	buf, err := s.MakeBuffer(request)
-	if err != nil {
-		return nil, err
+//Excute
+func (s *client) Excute(request Request) *Result {
+	result := &Result{
+		err:  nil,
+		data: []byte{},
 	}
+	p, err := s.buildValues(request)
+	if err != nil {
+		result.err = err
+		return result
+	}
+	buf := strings.NewReader(p.Encode())
 	req, err := http.NewRequest("POST", s.gateway, buf)
 	if err != nil {
-		return nil, err
+		result.err = err
+		return result
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded;charset=utf-8")
 
-	if s.client == nil {
-		s.client = http.DefaultClient
-	}
-	resp, err := s.client.Do(req)
+	resp, err := http.DefaultClient.Do(req)
+
 	if resp != nil {
 		defer resp.Body.Close()
 	}
 	if err != nil {
-		return nil, err
+		result.err = err
+		return result
 	}
 
+	//verify data
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		result.err = err
+		return result
 	}
-	fmt.Println(string(data))
 	if len(s.publicKey) > 0 {
 		var dataStr = string(data)
-
-		var rootNodeName = strings.Replace(request.Method(), ".", "_", -1) + RESPONSE_SUFFIX
-
+		var rootNodeName = strings.Replace(request.APIName(), ".", "_", -1) + "_response"
 		var rootIndex = strings.LastIndex(dataStr, rootNodeName)
-		var errorIndex = strings.LastIndex(dataStr, ERROR_RESPONSE)
-
+		var errorIndex = strings.LastIndex(dataStr, "error_response")
 		var content string
 		var sign string
-
 		if rootIndex > 0 {
 			content, sign = parserJSONSource(dataStr, rootNodeName, rootIndex)
 		} else if errorIndex > 0 {
-			content, sign = parserJSONSource(dataStr, ERROR_RESPONSE, errorIndex)
+			content, sign = parserJSONSource(dataStr, "error_response", errorIndex)
 		} else {
-			return nil, errors.New("error format")
+			result.err = errors.New("error format")
+			return result
 		}
-
-		if ok, err := verifyResponseData([]byte(content), s.signType, sign, s.publicKey); !ok {
-			return nil, err
+		if ok, err := verifyResponseData([]byte(content), sign, s.publicKey); !ok {
+			result.err = err
+			return result
 		}
 	}
-
-	err = json.Unmarshal(data, response)
-	if err != nil {
-		return nil, err
-	}
-	return response, nil
+	result.data = data
+	return result
 }
 
-func (s *client) MakeBuffer(request Request) (buf io.Reader, err error) {
+func (s *client) buildValues(request Request) (value url.Values, err error) {
 	var p = url.Values{}
-	p.Add("app_id", s.appId)
-	p.Add("method", request.Method())
+	p.Add("app_id", s.appID)
+	p.Add("method", request.APIName())
 	p.Add("format", "JSON")
 	p.Add("charset", "utf-8")
-	p.Add("sign_type", s.signType)
+	p.Add("sign_type", "RSA2")
 	p.Add("timestamp", time.Now().Format("2006-01-02 15:04:05"))
 	p.Add("version", "1.0")
 
-	if len(request.Name()) > 0 {
-		p.Add(request.Name(), request.JSON())
+	bytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
 	}
+	p.Add("biz_content", string(bytes))
 
 	var ps = request.Params()
 
@@ -139,32 +126,42 @@ func (s *client) MakeBuffer(request Request) (buf io.Reader, err error) {
 		p.Add(key, value)
 	}
 
-	var keys = make([]string, 0)
-	for key := range p {
-		keys = append(keys, key)
-	}
-
-	sort.Strings(keys)
-
-	var sign string
-	if s.signType == RSA {
-		sign, err = signRSA(keys, p, []byte(s.privateKey))
-	} else {
-		sign, err = signRSA2(keys, p, []byte(s.privateKey))
-	}
+	sign, err := sign(p, []byte(s.privateKey))
 	if err != nil {
 		return nil, err
 	}
+
 	p.Add("sign", sign)
+	return p, nil
+}
 
-	buf = strings.NewReader(p.Encode())
+func sign(param url.Values, privateKey []byte) (s string, err error) {
+	var keys = make([]string, 0)
+	for key := range param {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 
-	return buf, nil
+	var p = make([]string, 0)
+	for _, key := range keys {
+		var value = strings.TrimSpace(param.Get(key))
+		if len(value) > 0 {
+			p = append(p, key+"="+value)
+		}
+	}
+	var src = strings.Join(p, "&")
+
+	sig, err := signPKCS1v15([]byte(src), privateKey, crypto.SHA256)
+	if err != nil {
+		return "", err
+	}
+	s = base64.StdEncoding.EncodeToString(sig)
+	return s, nil
 }
 
 func parserJSONSource(rawData string, nodeName string, nodeIndex int) (content string, sign string) {
 	var dataStartIndex = nodeIndex + len(nodeName) + 2
-	var signIndex = strings.LastIndex(rawData, "\""+SIGN_NODE_NAME+"\"")
+	var signIndex = strings.LastIndex(rawData, "\"sign\"")
 	var dataEndIndex = signIndex - 1
 
 	var indexLen = dataEndIndex - dataStartIndex
@@ -173,7 +170,7 @@ func parserJSONSource(rawData string, nodeName string, nodeIndex int) (content s
 	}
 	content = rawData[dataStartIndex:dataEndIndex]
 
-	var signStartIndex = signIndex + len(SIGN_NODE_NAME) + 4
+	var signStartIndex = signIndex + len("sign") + 4
 	sign = rawData[signStartIndex:]
 	var signEndIndex = strings.LastIndex(sign, "\"}")
 	sign = sign[:signEndIndex]
@@ -181,61 +178,86 @@ func parserJSONSource(rawData string, nodeName string, nodeIndex int) (content s
 	return content, sign
 }
 
-func verifyResponseData(data []byte, signType, sign string, key string) (ok bool, err error) {
+func verifyResponseData(data []byte, sign string, key string) (ok bool, err error) {
 	signBytes, err := base64.StdEncoding.DecodeString(sign)
 	if err != nil {
 		return false, err
 	}
-
-	if signType == RSA {
-		err = VerifyPKCS1v15(data, signBytes, []byte(key), crypto.SHA1)
-	} else {
-		err = VerifyPKCS1v15(data, signBytes, []byte(key), crypto.SHA256)
-	}
+	err = verifyPKCS1v15(data, signBytes, []byte(key), crypto.SHA256)
 	if err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func signRSA2(keys []string, param url.Values, privateKey []byte) (s string, err error) {
-	if param == nil {
-		param = make(url.Values, 0)
+func signPKCS1v15(src, key []byte, hash crypto.Hash) ([]byte, error) {
+	var h = hash.New()
+	h.Write(src)
+	var hashed = h.Sum(nil)
+
+	var err error
+	var block *pem.Block
+	block, _ = pem.Decode(key)
+	if block == nil {
+		return nil, errors.New("private key error")
 	}
 
-	var pList = make([]string, 0)
-	for _, key := range keys {
-		var value = strings.TrimSpace(param.Get(key))
-		if len(value) > 0 {
-			pList = append(pList, key+"="+value)
-		}
-	}
-	var src = strings.Join(pList, "&")
-	sig, err := SignPKCS1v15([]byte(src), privateKey, crypto.SHA256)
+	var pri *rsa.PrivateKey
+	pri, err = x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	s = base64.StdEncoding.EncodeToString(sig)
-	return s, nil
+	return rsa.SignPKCS1v15(rand.Reader, pri, hash, hashed)
 }
 
-func signRSA(keys []string, param url.Values, privateKey []byte) (s string, err error) {
-	if param == nil {
-		param = make(url.Values, 0)
+func verifyPKCS1v15(src, sig, key []byte, hash crypto.Hash) error {
+	var h = hash.New()
+	h.Write(src)
+	var hashed = h.Sum(nil)
+
+	var err error
+	var block *pem.Block
+	block, _ = pem.Decode(key)
+	if block == nil {
+		return errors.New("public key error")
 	}
 
-	var pList = make([]string, 0)
-	for _, key := range keys {
-		var value = strings.TrimSpace(param.Get(key))
-		if len(value) > 0 {
-			pList = append(pList, key+"="+value)
-		}
-	}
-	var src = strings.Join(pList, "&")
-	sig, err := SignPKCS1v15([]byte(src), privateKey, crypto.SHA1)
+	var pubInterface interface{}
+	pubInterface, err = x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
-		return "", err
+		return err
 	}
-	s = base64.StdEncoding.EncodeToString(sig)
-	return s, nil
+	var pub = pubInterface.(*rsa.PublicKey)
+
+	return rsa.VerifyPKCS1v15(pub, hash, hashed, sig)
+}
+
+type Request interface {
+	// 用于提供访问的 method
+	APIName() string
+	// 返回参数列表
+	Params() map[string]string
+}
+
+type Response interface {
+}
+
+type ErrorResponse struct {
+	Code    string `json:"code"`
+	Msg     string `json:"msg"`
+	SubCode string `json:"sub_code"`
+	SubMsg  string `json:"sub_msg"`
+}
+
+type Result struct {
+	err  error
+	data []byte
+}
+
+func (s *Result) Decode(v interface{}) error {
+	if s.err != nil {
+		return s.err
+	}
+	err := json.Unmarshal(s.data, v)
+	return err
 }

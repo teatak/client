@@ -73,7 +73,7 @@ func RSADecrypt(ciphertext, key []byte) ([]byte, error) {
 	}
 
 	var data = packageData(ciphertext, pri.PublicKey.N.BitLen()/8)
-	var plainData []byte = make([]byte, 0, 0)
+	var plainData []byte = make([]byte, 0)
 
 	for _, d := range data {
 		var p, e = rsa.DecryptPKCS1v15(rand.Reader, pri, d)
