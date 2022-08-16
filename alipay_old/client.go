@@ -38,7 +38,7 @@ type client struct {
 }
 
 func NewDefaultClient() *client {
-	d := sections.AliPay["default"]
+	d := sections.Alipay["default"]
 	return &client{
 		gateway:    d.Gateway,
 		appId:      d.AppID,

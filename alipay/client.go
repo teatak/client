@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/teatak/config/sections"
 )
 
 type client struct {
@@ -25,15 +27,15 @@ type client struct {
 }
 
 //创建默认client
-// func NewDefault() *client {
-// 	d := sections.AliPay["default"]
-// 	return &client{
-// 		gateway:    d.Gateway,
-// 		appID:      d.AppID,
-// 		privateKey: d.PrivateKey,
-// 		publicKey:  d.PublicKey,
-// 	}
-// }
+func NewDefault() *client {
+	d := sections.Alipay["default"]
+	return &client{
+		gateway:    d.Gateway,
+		appID:      d.AppID,
+		privateKey: d.PrivateKey,
+		publicKey:  d.PublicKey,
+	}
+}
 
 //创建client
 func New(gateway, appID, privateKey, publicKey string) *client {
